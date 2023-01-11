@@ -5,8 +5,9 @@ import argparse
 import numpy as np
 from ahk import AHK
 from os import path
-from mss import mss
-from cv2 import cv2
+import mss
+#from timeit import default_timer as timer
+#from cv2 import cv2
 from PIL import Image
 from pathlib import Path
 from time import sleep, time
@@ -20,6 +21,11 @@ from models.experimental import attempt_load
 from utils.general import (apply_classifier, check_img_size,
                            non_max_suppression, plot_one_box, scale_coords,
                            set_logging, strip_optimizer, xyxy2xywh)
+
+import keras
+from keras.models import load_model
+from grabscreen import grab_screen
+#from getkeys import key_check
 
 parser = argparse.ArgumentParser(description='Detect on CS:GO')
 parser.add_argument('-w', help='absolute path to custom weights for YOLO(optional)', type=str, nargs='?', default='sequoiaV1.pt')
@@ -39,6 +45,7 @@ window_y = args.y
 y_offset = args.off
 _shoot = args.shoot
 benchmark = args.bench
+start = time()
 print(_shoot, benchmark)
 
 window_shape = [window_x, window_y, y_offset]
@@ -56,12 +63,32 @@ print("detecting on: %s"%(torch.cuda.get_device_name(device)))
 model = attempt_load(weights, map_location=device)  # load FP32 model
 load_light_weights(args.wl)
 print(f"using model from {weights}")
+print()
+
+model_name = 'steer_augmentation.h5'
+model2 = load_model(model_name)
+
+# Load Yolo
+net = cv2.dnn.readNet("yolov3-tiny.weights", "yolov3-tiny.cfg")
+classes = []
+with open("coco.names.txt", "r") as f:
+    classes = [line.strip() for line in f.readlines()]
+layer_names = net.getLayerNames()
+output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
+
+confidence_threshold = 0.6
+numskips = 0
+shot = False
 
 # Get names and colors
 names = model.module.names if hasattr(model, 'module') else model.names
 colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
 
 def shoot(bbox):
+    #enemy_seen = True
+    global start
+    start = time()
+    ahk.key_down('S')
     """Manages bbox to mouse emulator input conversion and clicking.
 
     Args:
@@ -73,28 +100,36 @@ def shoot(bbox):
         #   39 = 30 (ao inves de 26)
 
     bbox = list(map(int, bbox))
-    bbox[0] = bbox[0]*window_x/512 
-    bbox[2] = bbox[2]*window_x/512 
-    
-    bbox[1] = bbox[1]*window_y/512 
-    bbox[3] = bbox[3]*window_y/512 
+    bbox[0] = bbox[0]*window_x/512
+    bbox[2] = bbox[2]*window_x/512
 
-    print(bbox)
-    # x = (((bbox[2]-bbox[0])/2) + bbox[0]) - int(window_x/2)
-    # x_m = -0.00005*(x**2)  + 0.1094 * x
+    bbox[1] = bbox[1]*window_y/512
+    bbox[3] = bbox[3]*window_y/512
+
+    #print(bbox)
+    x = (((bbox[2]-bbox[0])/2) + bbox[0]) - int(window_x/2)
+    x_m = -0.00005*(x**2)  + 0.1094 * x
     x = ((bbox[2] - bbox[0])/2) + bbox[0]
     y = bbox[1] + 20
     #   target: body
-    # y = (((bbox[3]-bbox[1])/2) + bbox[1]) - 360
+    y = ((((bbox[3]-bbox[1])/2) + bbox[1]) - 360)
     #   target: head
-    # y = (bbox[1] + 20) - 360
-    # y_m = -0.00005*(y**2)  + 0.0463 * y
+    #y = (bbox[1] + 20) - 360
+    #y_m = (-0.00005*(y**2)  + 0.0463 * y) * 0.75
+    y_m = (-0.00005*(y**2)  + 0.0463 * y)
 
-    # if x<= 20 and  y <= 20: 
-        # ahk.click()
+    #if x<= 20 and  y <= 20:
+    #for x in range(20):
+    set_pos(x_m, y_m)
+    ahk.right_click()
+    ahk.click()
+    global shot
+    shot = True
+    sleep(0.02)
 
-    print(x, y)
-    set_pos(x, y)
+
+    #print(x, y)
+
 
 def detect(img, save_path, img_name, conf_threshold=0.4, view_img=False, \
     save_img=False, use_light=True, compare_light=False, only_enemies=False, enemy_str=None, benchmark=False):
@@ -107,7 +142,7 @@ def detect(img, save_path, img_name, conf_threshold=0.4, view_img=False, \
         conf_threshold (float): threshold to which bounding boxes will not be considered.
         view_img (bool): option for visualizing the outputs of the NN in real time.
         save_img (bool): option for saving images images with labeling.
-        use_light (bool): toggles the use of a helper NN, light_classifier, that aids in the classification of enemies/allies. 
+        use_light (bool): toggles the use of a helper NN, light_classifier, that aids in the classification of enemies/allies.
         compare_light (bool): toggles real time viewport annotation of comparison between yolo's classification and light's classification.
         only_enemies (bool): toggles only considering enemy bounding boxes.
         enemy_str (str): string that corresponds to which team is the enemy to be considered [in case only_enemies is enabled]; can be either "ct" or "tr".
@@ -133,7 +168,7 @@ def detect(img, save_path, img_name, conf_threshold=0.4, view_img=False, \
     pred = model(img)[0]
 
     # Apply NMS
-    pred = non_max_suppression(pred) 
+    pred = non_max_suppression(pred)
     toc_yolo = (time() - tic_yolo)*1000
     if benchmark:
         print(f"yolo: {toc_yolo} ms")
@@ -141,7 +176,7 @@ def detect(img, save_path, img_name, conf_threshold=0.4, view_img=False, \
     # Process detections
     bboxes = []
     for i, det in enumerate(pred):  # detections per image
-        p, s = "teste", ""
+        p, s = "test", ""
 
         s += '%gx%g ' % img.shape[2:]  # print string
         gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
@@ -210,9 +245,64 @@ def detect(img, save_path, img_name, conf_threshold=0.4, view_img=False, \
 
 while True:
     img_name = str(int(time()*1000))
-    with mss() as sct:
+    ahk.key_down('W')
+    ahk.key_down('E')
+    '''-------------Screenshot for YOLO and CNN------------------------'''
+    screen2 = grab_screen(region=(0,26,1280,720)) # take screen shot of the screen
+    img2 = screen2 #make a copy for YOLOv3
+    window_width2 = 1280
+    img2 = img2 [:, round(window_width2/4):round(window_width2*3/4)]
+    img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB)
+    height2, width2, channels2 = img2.shape
+    #window_width = width
+
+    #print ("FPS: ", 1/(time.time()-last_time)) #print FPS
+    last_time = time()
+    '''-------------------resize and reshape the input image for CNN----------------'''
+    screen2 = cv2.cvtColor(screen2, cv2.COLOR_BGR2GRAY)
+    screen2 = cv2.resize(screen2, (160,120))
+
+    if not shot:
+        prediction = model2.predict([screen2.reshape(-1,160,120,1)])[0]
+        print (prediction)
+        steering_angle = prediction [0]
+        if steering_angle > 0.20:
+            ahk.key_press('D')
+            #steering_angle = steering_angle*1.5
+
+        elif steering_angle < -0.20:
+            ahk.key_press('A')
+
+        else:
+            numskips += 1
+
+        if numskips >= 20:
+            #set_pos(-180, 0)
+            randintleft = random.randint(-180, -120)
+            randintright = random.randint(120, 180)
+            set_pos(random.choice([randintleft, randintright]), 0)
+            numskips = 0
+
+    with mss.mss() as sct:
         # 1280 windowed mode for CS:GO, at the top left position of your main screen.
-        # 26 px accounts for title bar. 
+        # 26 px accounts for title bar.
+        end = time()
+        #print(end - start)
+        if (end - start) > 3:
+            start = time()
+            #set_pos(random.randint(-180, 180), 0)
+            #ahk.click()
+            ahk.key_up('W')
+            ahk.key_up('E')
+            ahk.key_press('Space')
+            ahk.key_press('Enter')
+            ahk.key_up('S')
+            #if not flashlight:
+            ahk.key_press('F')
+            ahk.key_press('R')
+            shot = False
+                #flashlight = True
+
         monitor = {"top": y_offset, "left": 0, "width": window_x, "height": window_y}
         img = sct.grab(monitor)
         #create PIL image
@@ -222,7 +312,7 @@ while True:
         imgarr = cv2.cvtColor(imgarr, cv2.COLOR_BGR2RGB)
 
         tic = time()
-        bboxes = detect(imgarr, save_path, img_name, view_img=True, use_light=False, benchmark=benchmark) 
+        bboxes = detect(imgarr, save_path, img_name, view_img=True, use_light=False, benchmark=benchmark)
         toc = time() - tic
         if benchmark:
             print(f'total time: {toc*1000:1f} ms')
@@ -230,6 +320,4 @@ while True:
         if len(bboxes) > 0 and _shoot:
             shoot(bboxes[0])
 
-        # sleep(0.01)
-
-            
+    # sleep(0.01)'''
