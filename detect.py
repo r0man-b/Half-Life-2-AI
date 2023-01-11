@@ -46,6 +46,7 @@ y_offset = args.off
 _shoot = args.shoot
 benchmark = args.bench
 start = time()
+startShoot = time()
 print(_shoot, benchmark)
 
 window_shape = [window_x, window_y, y_offset]
@@ -88,6 +89,8 @@ def shoot(bbox):
     #enemy_seen = True
     global start
     start = time()
+    global startShoot
+    startShoot = time()
     ahk.key_down('S')
     """Manages bbox to mouse emulator input conversion and clicking.
 
@@ -122,7 +125,7 @@ def shoot(bbox):
     #for x in range(20):
     set_pos(x_m, y_m)
     ahk.right_click()
-    ahk.click()
+    ahk.key_down("P")
     global shot
     shot = True
     sleep(0.02)
@@ -288,6 +291,8 @@ while True:
         # 26 px accounts for title bar.
         end = time()
         #print(end - start)
+        if (end - startShoot) > 1:
+            ahk.key_up('P')
         if (end - start) > 3:
             start = time()
             #set_pos(random.randint(-180, 180), 0)
