@@ -16,6 +16,8 @@ Installation:
 
 6. Make sure game window is 1280x720 windowed mode, and is located at the top left corner of screen
 
+7. Run the bot by executing: "python detect.py -shoot 1"
+
 This project was built on top of other works, listed below:
 
 IgaoGuru's CS:GO Sequoira neural network:
